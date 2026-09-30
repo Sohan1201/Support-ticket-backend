@@ -74,34 +74,56 @@ export function checkAiResult(
       reviewReason: "enterprise_priority_violation",
     };
   }
+    if (subject.trim() === "" && body.trim() === "") {
+    return {
+      decision: TriageDecision.manual_review,
+      reviewReason: "insufficient_ticket_content",
+    };
+  }
 
   const ticketText = `${subject} ${body}`.toLowerCase();
 
+  const promptInjectionSignal = containsAny(ticketText, [
+    "ignore all previous instructions",
+    "ignore previous instructions",
+    "ignore all prior instructions",
+    "system prompt",
+    "classify this ticket",
+    "follow these instructions",
+  ]);
+
+  if (promptInjectionSignal) {
+    return {
+      decision: TriageDecision.manual_review,
+      reviewReason: "suspicious_customer_instruction",
+    };
+  }
+ 
+
   const billingSignal = containsAny(ticketText, [
-    "bill",
-    "billing",
-    "refund",
-    "charge",
-    "payment",
-    "invoice",
-  ]);
+  "bill",
+  "billing",
+  "refund",
+  "charge",
+  "payment",
+  "invoice",
+]);
 
-  const accountSignal = containsAny(ticketText, [
-    "login",
-    "log in",
-    "password",
-    "account",
-    "sign in",
-    "sso",
-  ]);
+const accountSignal = containsAny(ticketText, [
+  "login",
+  "log in",
+  "password",
+  "account",
+  "sign in",
+  "sso",
+]);
 
-  const featureSignal = containsAny(ticketText, [
-    "feature",
-    "request",
-    "add support",
-    "would like",
-  ]);
-
+const featureSignal = containsAny(ticketText, [
+  "feature",
+  "request",
+  "add support",
+  "would like",
+]);
   if (result.category === TicketCategory.billing && !billingSignal) {
     return {
       decision: TriageDecision.manual_review,
