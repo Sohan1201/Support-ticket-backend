@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { TicketCategory, TicketPriority, TriageDecision } 
-from "../generated/prisma/enums";
+from "../src/generated/prisma/enums";
 
 import { checkAiResult } from "../src/services/triage.service";
 
 describe("AI triage checker", () => {
   it("accepts a valid result", () => {
     const result = checkAiResult(
-      {
-        category: TicketCategory.account_access,
-        priority: TicketPriority.P1,
-        summary: "Customer cannot log in using SSO.",
-      },
-      "enterprise",
-    );
+  {
+    category: TicketCategory.account_access,
+    priority: TicketPriority.P1,
+    summary: "Customer cannot log in.",
+  },
+  "enterprise",
+  "Cannot log in",
+  "The customer cannot log in to their account.",
+  );
 
     expect(result.decision).toBe(TriageDecision.auto_accept);
   });

@@ -4,10 +4,7 @@ import {
   TriageDecision,
 } from "../generated/prisma/enums";
 
-import {
-  AiClassificationResult,
-  TriageResult,
-} from "./ai.service";
+import { AiClassificationResult } from "./ai.service";
 
 const validCategories = new Set<TicketCategory>([
   TicketCategory.billing,
@@ -24,21 +21,29 @@ const validPriorities = new Set<TicketPriority>([
   TicketPriority.P3,
 ]);
 
+function containsAny(text: string, words: string[]): boolean {
+  const normalized = text.toLowerCase();
+
+  return words.some((word) => normalized.includes(word));
+}
+
 export function checkAiResult(
   result: AiClassificationResult,
   customerPlan: string,
+  subject = "",
+  body = "",
 ): TriageResult {
   if (!validCategories.has(result.category)) {
     return {
       decision: TriageDecision.manual_review,
-      reviewReason: "AI returned an invalid category",
+      reviewReason: "invalid_category",
     };
   }
 
   if (!validPriorities.has(result.priority)) {
     return {
       decision: TriageDecision.manual_review,
-      reviewReason: "AI returned an invalid priority",
+      reviewReason: "invalid_priority",
     };
   }
 
@@ -48,14 +53,14 @@ export function checkAiResult(
   ) {
     return {
       decision: TriageDecision.manual_review,
-      reviewReason: "AI returned an invalid summary",
+      reviewReason: "invalid_summary",
     };
   }
 
   if (result.summary.trim().split(/\s+/).length > 25) {
     return {
       decision: TriageDecision.manual_review,
-      reviewReason: "AI summary exceeds 25 words",
+      reviewReason: "summary_too_long",
     };
   }
 
@@ -66,11 +71,70 @@ export function checkAiResult(
   ) {
     return {
       decision: TriageDecision.manual_review,
-      reviewReason: "Enterprise ticket was assigned below P1",
+      reviewReason: "enterprise_priority_violation",
+    };
+  }
+
+  const ticketText = `${subject} ${body}`.toLowerCase();
+
+  const billingSignal = containsAny(ticketText, [
+    "bill",
+    "billing",
+    "refund",
+    "charge",
+    "payment",
+    "invoice",
+  ]);
+
+  const accountSignal = containsAny(ticketText, [
+    "login",
+    "log in",
+    "password",
+    "account",
+    "sign in",
+    "sso",
+  ]);
+
+  const featureSignal = containsAny(ticketText, [
+    "feature",
+    "request",
+    "add support",
+    "would like",
+  ]);
+
+  if (result.category === TicketCategory.billing && !billingSignal) {
+    return {
+      decision: TriageDecision.manual_review,
+      reviewReason: "category_does_not_match_ticket",
+    };
+  }
+
+  if (
+    result.category === TicketCategory.account_access &&
+    !accountSignal
+  ) {
+    return {
+      decision: TriageDecision.manual_review,
+      reviewReason: "category_does_not_match_ticket",
+    };
+  }
+
+  if (
+    result.category === TicketCategory.feature_request &&
+    !featureSignal
+  ) {
+    return {
+      decision: TriageDecision.manual_review,
+      reviewReason: "category_does_not_match_ticket",
     };
   }
 
   return {
     decision: TriageDecision.auto_accept,
   };
+}
+
+export interface TriageResult {
+  decision: TriageDecision;
+  reviewReason?: string;
 }

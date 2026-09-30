@@ -158,8 +158,10 @@ export async function createTicket(
 
   const classification = aiResult.classification;
   const triage = checkAiResult(
-    classification,
-    input.customer_plan,
+  classification,
+  input.customer_plan,
+  input.subject,
+  input.body,
   );
 
   await prisma.aiClassification.create({
