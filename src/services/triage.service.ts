@@ -107,7 +107,13 @@ export function checkAiResult(
   "charge",
   "payment",
   "invoice",
-]);
+  "reembolso",
+  "factura",
+  "cargo",
+  "cobro",
+  "pago",
+  "devolución",
+  ]);
 
 const accountSignal = containsAny(ticketText, [
   "login",

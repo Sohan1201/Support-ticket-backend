@@ -11,7 +11,7 @@ import { checkAiResult } from "./triage.service";
 import { calculateSlaDeadline } from "./sla.services";
 
 const SAME_PROBLEM_WINDOW_MS = 10 * 60 * 1000;
-const SAME_PROBLEM_THRESHOLD = 0.4;
+const SAME_PROBLEM_THRESHOLD = 0.3;
 
 function normalizeWords(text: string): Set<string> {
   return new Set(
