@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum CustomerPlan {
+  free
+  pro
+  enterprise
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+}
+
+enum TicketCategory {
+  billing
+  bug
+  account_access
+  feature_request
+  other
+}
+
+enum TicketPriority {
+  P0
+  P1
+  P2
+  P3
+}
+
+enum TriageDecision {
+  auto_accept
+  manual_review
+}
+
+model Ticket {
+  id              String          @id @default(cuid())
+  externalId      String          @unique @map("external_id")
+  customerId      String          @map("customer_id")
+  customerPlan    CustomerPlan    @map("customer_plan")
+  subject         String
+  body            String
+  createdAt       DateTime        @map("created_at")
+  status          TicketStatus    @default(open)
+  category        TicketCategory?
+  priority        TicketPriority?
+  summary         String?
+  triageDecision  TriageDecision?
+  reviewReason    String?
+  claimedBy       String?         @map("claimed_by")
+  claimedAt       DateTime?       @map("claimed_at")
+  parentTicketId  String?         @map("parent_ticket_id")
+  slaDeadline     DateTime?       @map("sla_deadline")
+  resolvedAt      DateTime?       @map("resolved_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  aiClassifications AiClassification[]
+
+  @@index([status, id])
+  @@index([priority, id])
+  @@index([category, id])
+  @@index([triageDecision, id])
+  @@index([parentTicketId])
+  @@map("tickets")
+}
+
+model AiClassification {
+  id            String         @id @default(cuid())
+  ticketId      String         @map("ticket_id")
+  category      TicketCategory?
+  priority      TicketPriority?
+  summary       String?
+  tokenUsage    Int?           @map("token_usage")
+  model         String?
+  durationMs    Int?           @map("duration_ms")
+  success       Boolean        @default(false)
+  failureReason String?        @map("failure_reason")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ai_classifications")
+}
