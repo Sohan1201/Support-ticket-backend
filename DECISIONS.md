@@ -1,168 +1,97 @@
 DECISIONS
 
-1. Scope and technology
+1. Unclear, clashing and unrealistic points
 
-The project uses Node.js, TypeScript, Express, PostgreSQL, Prisma, Zod, OpenAI, Vitest/Supertest and Docker Compose.
+The assignment leaves a few important details open, so the following decisions were made:
 
-The implementation was kept small and focused on the assignment instead of adding unnecessary infrastructure or features.
+- Same-problem tickets: "within a few minutes" was not defined. We chose a 10-minute window, require the same customer, and use normalized word-overlap similarity with a 0.30 threshold. The first matching ticket becomes the parent. The threshold was changed from 0.40 to 0.30 after testing the supplied SSO example.
+- 200 ms response time: the requirement includes the external AI call, whose latency cannot be fully controlled. We use a configurable AI_TIMEOUT_MS value, with a default of 150 ms. If AI is slow or fails, the ticket is still saved and sent to manual review.
+- AI latency testing: we tested progressively up to approximately 400 ms. We could not continue testing to determine the right time period because the OpenAI account had no remaining credits/tokens. Therefore, 400 ms is not treated as a provider latency limit or production benchmark. With a funded account, actual latency should be measured and the timeout adjusted accordingly. Thus not all tickets will go to manual review.
+- Enterprise priority: enterprise tickets must be at least P1, so P0 and P1 are accepted while P2/P3 require manual review.
+- Priority changes and SLA: the assignment does not specify what happens to the deadline after a priority change. We recalculate the deadline from the original created_at using the new priority's SLA.
+- New tickets during pagination: offset pagination could cause duplicates or missed tickets. We use cursor pagination ordered by created_at and id.
+- Invalid customer plan: the API only allows free, pro and enterprise, so the supplied platinum ticket is rejected rather than weakening the API contract.
+- Customer text: customer content is untrusted and must not be allowed to change the AI's instructions or business rules.
+- AI or checker failure: if the AI or checker fails, is too slow, or produces unusable output, the service must continue running and the ticket must be saved for manual review.
+- Empty ticket: a ticket with no subject or body is saved but sent to manual review because there is not enough information to classify it unreliably.
 
-2. Duplicate tickets
-
-external_id is treated as an idempotency key and is UNIQUE in PostgreSQL. A duplicate external_id is rejected, including when concurrent requests occur.
-
-3. Same-problem tickets
-
-The assignment says tickets describing the same problem within "a few minutes" should be linked, but does not define the exact window or similarity method.
-
-Decision:
-- 10-minute window
-- Same customer required
-- Compare against earlier tickets
-- Normalize text and use word-overlap similarity
-- Threshold: 0.30
-- Link to the first matching earlier ticket
-
-This was chosen because it is deterministic and explainable. Advanced semantic/vector similarity was not added. The threshold was reduced from 0.40 to 0.30 after testing the supplied SSO scenario.
-
-4. AI response time
-
-The assignment requires POST /tickets to respond within 200 ms including AI.
-
-External AI latency cannot be fully controlled, so AI_TIMEOUT_MS is configurable and defaults to 150 ms. If AI is slow, fails, or returns unusable output, the ticket is still saved and sent to manual review.
-
-We tested progressively up to approximately 400 ms. We could not continue testing to determine the right time period because the OpenAI account had no remaining credits/tokens. Therefore, 400 ms is not claimed as a provider latency limit or production benchmark. A funded production account should be used to measure actual latency and tune the timeout.
-
-5. Customer text and AI safety
-
-Customer subject and body are untrusted data. The AI is explicitly instructed not to follow instructions contained in customer text.
-
-The checker independently looks for suspicious prompt-injection instructions and sends those tickets to manual review.
-
-The checker is separate from the AI and validates:
-- allowed category and priority
-- summary presence and maximum length
-- enterprise priority rules
-- whether the classification matches the ticket
-- insufficient ticket content
-- suspicious customer instructions
-
-If the checker is uncertain, the ticket goes to manual review.
-
-6. Enterprise priority
-
-Enterprise tickets must be at least P1.
-
-P0 and P1 are therefore acceptable. P2 and P3 are sent to manual review. This rule is enforced by the checker rather than being left to the AI.
-
-7. AI failure and rubbish output
-
-AI failure, timeout, invalid output, or other unusable results must not bring down the service.
-
-The ticket is saved, the AI attempt is recorded, and the ticket is marked manual_review.
-
-8. Empty tickets
-
-A ticket with both subject and body empty is still saved but marked manual_review with insufficient_ticket_content.
-
-9. Seed ticket outcomes
+2. What happens to each test ticket
 
 T-1001:
 Enterprise SSO login failure.
 Result: account_access, P1, auto_accept.
 
 Duplicate T-1001:
-Rejected because external_id is already present.
+Rejected because the same external_id has already been saved.
 
 T-1002:
-Another SSO failure from the same customer four minutes later.
-Result: account_access, P1, auto_accept, linked to T-1001.
+Another SSO login failure from the same customer four minutes later.
+Result: account_access, P1, auto_accept, linked to T-1001 because it matches the same-problem rule,T-1001 becpomes the parent ticket.
 
 T-1003:
-Contains instructions attempting to force P0/billing classification.
-Result: manual_review because customer instructions are untrusted.
+Contains instructions attempting to force the classification to P0 and billing.
+Result: manual_review because customer instructions are untrusted and the content is suspicious.
 
 T-1004:
 Spanish duplicate billing/refund complaint.
-Result: billing, P2, auto_accept. Spanish billing/refund terms are handled by the checker.
+Result: billing, P2, auto_accept. Spanish billing and refund terms are handled by the checker.
 
 T-1005:
 Empty subject and body.
 Result: manual_review because there is insufficient information.
 
 T-1006:
-Uses unsupported customer plan "platinum".
-Result: rejected before normal ticket creation because the API only accepts free, pro and enterprise.
+Uses the unsupported customer plan "platinum".
+Result: rejected before normal ticket creation because only free, pro and enterprise are allowed.
 
 T-1007:
 Missing password-reset email with urgent wording.
 Result: account_access, P1, auto_accept.
 
-10. SLA
+3. Where the service refuses to follow the AI, and why
 
-SLA durations:
-P0 = 1 hour
-P1 = 4 hours
-P2 = 24 hours
-P3 = 72 hours
+The AI is not treated as the final authority.
 
-The deadline is calculated from the original created_at.
+The service refuses or overrides an AI result when:
 
-If priority changes after arrival, the deadline is recalculated from the original created_at using the new priority's SLA. This was left unspecified by the assignment, so the behavior is explicitly documented here.
+- The output is incomplete, malformed, or uses values outside the allowed category or priority values.
+- The summary is missing or exceeds 25 words.
+- The AI result does not match the ticket content.
+- The ticket contains suspicious instructions attempting to influence the classification.
+- An enterprise ticket is classified below P1.
+- The ticket does not contain enough information to classify it reliably.
+- The AI times out, fails, or returns unusable output.
 
-GET /stats reports late, at-risk and on-track tickets for each priority. Resolved tickets are excluded.
+In these cases the ticket is saved and marked manual_review rather than allowing an unreliable AI result to be used.
 
-11. Agent behaviour
+Customer text is also explicitly treated as untrusted data, so instructions inside a ticket cannot change the AI's classification rules or the independent checker.
 
-Allowed status transitions are:
+4. What I would watch after launch
 
-open -> in_progress
-in_progress -> resolved
-resolved -> open
+To understand whether AI sorting is getting better or worse:
 
-Other transitions are rejected.
+- AI success and failure rate
+- AI timeout rate
+- AI latency, especially p95/p99
+- Token usage and cost
+- Percentage of tickets sent to manual review
+- Checker rejection rate
+- Category and priority distributions
+- Differences between AI classifications and agent corrections
+- SLA breaches by priority
 
-Claiming uses an atomic database update requiring the ticket to still be open and unclaimed. Therefore, when two agents claim simultaneously, only one succeeds.
+Agent corrections would be reviewed over time to identify repeated classification errors and determine whether the AI or checker needs improvement.
 
-Manual triage changes are allowed only for tickets in manual_review. A written reason is required. After an agent resolves the review, the triage decision becomes auto_accept.
+5. What was skipped because of time and what would be done with one more week
 
-12. Pagination
+The core backend requirements were implemented. Because of the time limit, I kept some areas simple, particularly the same-problem detection and AI timeout handling.
 
-GET /tickets uses cursor pagination.
+With one more week, I would first determine a more reliable AI timeout using proper latency testing, so that normal AI responses are accepted while genuinely slow or failed requests still go to manual review. I would also improve same-problem detection and add more load and failure testing around the backend.
 
-Results are ordered by created_at DESC and id DESC, and both values are included in the cursor. This provides stable traversal when new tickets arrive and avoids the duplicate/missing-row problems associated with offset pagination.
+6. Example of a tool or suggestion that was wrong or poor
 
-Filters are provided for status, priority, category and triage_decision.
+During development, a suggestion was made to add GET /tickets/:id because it seemed useful for testing and debugging.
 
-13. AI usage and monitoring
+After checking the assignment PDF again, I found that this endpoint was not actually required. It was removed instead of adding unnecessary API surface.
 
-AI token usage is recorded when provided by the AI service.
-
-After launch, we would monitor:
-- AI success/failure rate
-- timeout rate
-- latency, especially p95/p99
-- token usage and cost
-- manual-review rate
-- checker rejection rate
-- category and priority distribution
-- disagreement between AI classifications and agent corrections
-- SLA breaches
-
-Agent corrections should be reviewed to identify recurring AI classification problems.
-
-14. Testing
-
-Tests use a fake AI and never depend on the real AI service or API credits.
-
-The important cases covered include:
-- accepted AI classifications
-- manual review
-- enterprise priority violations
-- prompt injection
-- empty tickets
-- Spanish billing
-- category mismatch
-- same-problem linking
-- concurrent claims
-- manual triage changes
-- invalid manual triage requests
+This reinforced the decision to use the assignment PDF as the source of truth and focus only on the required functionality.
